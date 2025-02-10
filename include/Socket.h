@@ -19,7 +19,8 @@ protected:
         std::string ipAddress;
         int port;
         sockaddr_in serverAddress;
-        int iAccSocket;
+        std::vector<int> iAccSocket;
+        int iMaxNumberOfClientConnections;
     };
 
     enum class ConnectionStatus : int
@@ -35,18 +36,22 @@ protected:
 class SocketServer : public Socket
 {
 public:
-    SocketServer(const std::string& cIpAddress, int iPort);
+    SocketServer(const std::string& cIpAddress, int iPort, int iMaxNumberOfClients = 1);
     ~SocketServer();
+    int ServerThread();
     int ServerStart();
-    void ServerEnd();
-    int Write(const std::string& message);
+    void ServerEnd(int iThreadIndex);
+    int Write(const std::string& message, int iThreadIndex);
     bool IsServerRunning() { return m_bThreadRunning; }
+    bool IsReconnectEnabled() { return m_bEnableReconnect; }
 private:
     SocketStructure serverStructure;
-    void ReadThread();
+    int ServerThreadsManager(int iThreadIndex);
+    void Read(int iThreadIndex);
     virtual int CallbackOnMessage(const std::string& message) { return 1; };
     virtual int CallbackOnSendError(const std::string& message) { return 1; };
     bool m_bThreadRunning = true;
+    bool m_bEnableReconnect = true;
     std::vector<std::thread> m_vServerThreadPool;
 };
 
