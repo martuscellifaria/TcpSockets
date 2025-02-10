@@ -8,39 +8,64 @@ Socket::~Socket()
 {
 }
 
+void Socket::SetTimeout(SocketStructure& socketStructure)
+{
+    struct timeval tv;
+    tv.tv_sec = SOCKETS_TIMEOUT;
+    tv.tv_usec = 0;
+    setsockopt(socketStructure.iSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+}
+
 SocketServer::SocketServer(const std::string& cIpAddress, int iPort, int iMaxNumberOfClients)
 {
     serverStructure.ipAddress = cIpAddress;
     serverStructure.port = iPort;
     serverStructure.iMaxNumberOfClientConnections = iMaxNumberOfClients;
     serverStructure.iSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    SetTimeout(serverStructure);
+
     serverStructure.serverAddress.sin_family = AF_INET;
     serverStructure.serverAddress.sin_port = htons(iPort);
     serverStructure.serverAddress.sin_addr.s_addr = INADDR_ANY;
 
-    int connStatus;
+    for (int i = 0; i < iMaxNumberOfClients; i++)
+    {
+        m_vThreadRunning.push_back(false);
+        serverStructure.iAccSocket.push_back((int)ConnectionStatus::Error);
+    }
+
     bind
     (
         serverStructure.iSocket,
         (struct sockaddr*)&serverStructure.serverAddress,
         sizeof(serverStructure.serverAddress)
     );
+
+    int connStatus = listen(serverStructure.iSocket, serverStructure.iMaxNumberOfClientConnections);
 }
 
 SocketServer::~SocketServer()
 {
+    m_bEnableReconnect = false;
+    for (int i = 0; i < serverStructure.iMaxNumberOfClientConnections; i++)
+    {
+        m_vThreadRunning[i] = false;
+        ServerEnd(i);
+    }
+    for (auto& thr : m_vServerThreadPool)
+    {
+        thr.join();
+    }
 }
 
-int SocketServer::ServerThread()
+void SocketServer::ServerThread()
 {
     for (int i = 0; i < serverStructure.iMaxNumberOfClientConnections; i++)
     {
         std::thread mainServerThread(&SocketServer::ServerThreadsManager, this, i);
         m_vServerThreadPool.push_back(move(mainServerThread));
-        std::cout << "Starting thread " << i << '\n';
     }
-    
-    return 1;
 }
 
 int SocketServer::ServerThreadsManager(int iThreadIndex)
@@ -49,11 +74,11 @@ int SocketServer::ServerThreadsManager(int iThreadIndex)
 
     while (IsReconnectEnabled())
     {
-        connStatus = ServerStart();
+        connStatus = ServerStart(iThreadIndex);
         if (connStatus != (int)ConnectionStatus::Error)
         {
             Read(iThreadIndex);
-            if (!m_bThreadRunning)
+            if (!m_vThreadRunning[iThreadIndex])
             {
                 ServerEnd(iThreadIndex);
             }
@@ -67,41 +92,43 @@ int SocketServer::ServerThreadsManager(int iThreadIndex)
     return connStatus;
 }
 
-int SocketServer::ServerStart()
+int SocketServer::ServerStart(int iThreadIndex)
 {
-
-    int connStatus = listen(serverStructure.iSocket, serverStructure.iMaxNumberOfClientConnections);
-
-    serverStructure.iAccSocket.push_back(accept(serverStructure.iSocket, nullptr, nullptr));
-
-    m_bThreadRunning = true;
-
+    int connStatus = accept(serverStructure.iSocket, nullptr, nullptr);
+    serverStructure.iAccSocket[iThreadIndex] = connStatus;
+    m_vThreadRunning[iThreadIndex] = true;
     return connStatus;
 }
 
 void SocketServer::ServerEnd(int iThreadIndex)
 {
-    std::cout << iThreadIndex << " disconnected" << '\n';
     close(serverStructure.iAccSocket[iThreadIndex]);
     serverStructure.iAccSocket.erase(serverStructure.iAccSocket.begin() + iThreadIndex);
 }
 
 void SocketServer::Read(int iThreadIndex)
 {
-    while (m_bThreadRunning)
+    while (m_vThreadRunning[iThreadIndex])
     {
         char buffer[BUFFER_SIZE] = { 0 };
         int recvStatus;
         recvStatus = recv(serverStructure.iAccSocket[iThreadIndex], &buffer, sizeof(buffer), 0);
-        if (recvStatus > (int)ConnectionStatus::NotConnected)
+        switch (recvStatus)
         {
-            CallbackOnMessage(buffer);
-            Write("Do you wrote something?", iThreadIndex);
-            std::cout << serverStructure.iAccSocket[iThreadIndex] << " Message from client: " << buffer<< '\n';
-        }
-        else
-        {
-            m_bThreadRunning = false;
+            case (int)MessageStatus::NotConnected:
+            {
+                m_vThreadRunning[iThreadIndex] = false;
+                break;
+            }
+            case (int)MessageStatus::Timeout:
+            {
+                break;
+            }
+            default:
+            {
+                CallbackOnMessage(buffer);
+                break;
+            }
         }
     }
 }
@@ -187,11 +214,9 @@ void SocketClient::Read()
         if (recvStatus > (int)ConnectionStatus::NotConnected)
         {
             CallbackOnMessage(buffer);
-            std::cout << "Message from server: " << buffer << '\n';
         }
         else
         {
-            std::cout << "Server down" << buffer << '\n';
             m_bThreadRunning = false;
         }
     }
