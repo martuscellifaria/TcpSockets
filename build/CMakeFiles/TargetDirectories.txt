@@ -1,0 +1,3 @@
+/home/martuscellifaria/Projekte/TcpSockets/build/CMakeFiles/Sockets.dir
+/home/martuscellifaria/Projekte/TcpSockets/build/CMakeFiles/edit_cache.dir
+/home/martuscellifaria/Projekte/TcpSockets/build/CMakeFiles/rebuild_cache.dir
