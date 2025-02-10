@@ -1,1 +1,0 @@
-/usr/bin/c++ -rdynamic CMakeFiles/MyTarget.dir/src/main.o -o MyTarget 
